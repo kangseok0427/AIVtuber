@@ -19,9 +19,10 @@ class MemoryTool:
         )
 
     def save(self, user_input: str, answer: str):
+        name = os.getenv("VTUBER_NAME", "가온")  # ✅ 추가
         self.db.add_documents([
             Document(
-                page_content=f"시청자: {user_input}\n하루: {answer}",
+                page_content=f"시청자: {user_input}\n{name}: {answer}",
                 metadata={"timestamp": datetime.now().isoformat()}
             )
         ])
