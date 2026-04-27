@@ -76,7 +76,7 @@ EMOTION_MAP = {
     "sad":       "Exp5 FaceShadow",
     "angry":     "Exp8 Angry",
     "thinking":  "Exp9 Loading",
-    "neutral":   None  # 기본 표정
+    "neutral":   None
 }
 
 def detect_emotion(answer: str) -> str:
