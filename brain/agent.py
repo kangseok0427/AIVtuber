@@ -59,6 +59,7 @@ Tool priority:
 
 Only call tools when necessary.
 """)
+    #필요한 정보가 더 있다면 되묻기 + 할루미네이션 방지하기(최상단 레이어) 시스템 프롬포트 레이어 구성
     human = HumanMessage(content=state["user_input"])
     messages = [system, human]
     response = llm_think_with_tools.invoke(messages)
@@ -83,7 +84,7 @@ EMOTION_MAP = {
     "thinking":  "Exp9 Loading",
     "neutral":   None
 }
-
+# 노드와 엣지! 학습 시작하기
 def detect_emotion(answer: str) -> tuple[str, str]:
     """[EMOTION:태그] 추출 후 답변에서 제거"""
     match = re.search(r'\[EMOTION:(\w+)\]', answer)
@@ -175,8 +176,9 @@ if __name__ == "__main__":
             print(f"\n😊 감정: {result['emotion']} → {result['vtube_expression']}")
             print(f"🎤 {NAME}: {result['answer']}\n")
 
-            if result["answer"].strip():
-                await text_to_speech(result["answer"])
-            await bridge.trigger_and_reset(result["vtube_expression"], duration=3.0)
+            await asyncio.gather(
+                bridge.trigger_and_reset(result["vtube_expression"], duration=3.0),
+                text_to_speech(result["answer"])
+            )
 
     asyncio.run(main())  # ← 이게 async 함수를 실행시켜주는 진입점

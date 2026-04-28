@@ -6,7 +6,7 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_core.documents import Document
 
 class MemoryTool:
-    def __init__(self, collection: str = "memory"):
+    def __init__(self, collection: str = "gaon_memory"):  # ✅ 이름 고정
         self.collection = collection
         self.embeddings = OllamaEmbeddings(
             model=os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
