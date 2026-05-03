@@ -13,6 +13,7 @@ from brain.tools import SearchTool, GuidebookTool, MemoryTool
 from avatar.vtube_bridge import VTubeBridge
 from tts.tts import text_to_speech
 import re
+import re as _re
 
 load_dotenv()
 
@@ -37,6 +38,12 @@ llm_answer = ChatOllama(model=ANSWER_MODEL, base_url=BASE_URL, temperature=T_ANS
 # 툴 바인딩은 think LLM에만 (툴 호출 판단은 냉정하게)
 llm_think_with_tools = llm_think.bind_tools(tools)
 
+# brain/agent.py - 상단에 추가
+
+def load_prompt(filename: str, **kwargs) -> str:
+    with open(f"prompts/{filename}", "r", encoding="utf-8") as f:
+        return f.read().format(**kwargs)
+
 # 상태 정의
 # brain/agent.py - VTuberState에 필드 추가
 
@@ -49,24 +56,29 @@ class VTuberState(TypedDict):
 
 # 노드 1 — think (툴 호출 판단 + 사고)
 def think_node(state: VTuberState) -> VTuberState:
-    system = SystemMessage(content=f"""You are the brain of AI VTuber '{NAME}'.
-Analyze the user's message and call the appropriate tools if needed.
+    # 최근 3개 대화 시간순으로 무조건 불러오기
+    all_results = memory_tool.db.get()
+    memory_context = ""
 
-Tool priority:
-1. memory_search - check past context first when conversation seems related to previous messages
-2. internet_search - for current info, news, weather
-3. guidebook_search - for character rules/settings
+    if all_results and all_results['documents']:
+        paired = list(zip(all_results['documents'], all_results['metadatas']))
+        paired.sort(key=lambda x: x[1].get('timestamp', ''), reverse=True)
+        recent = paired[:3]
+        recent.reverse()
+        memory_context = "\n\n[최근 대화 기록]\n" + "\n".join(
+            f"- {doc}" for doc, _ in recent
+        )
 
-Only call tools when necessary.
-""")
-    #필요한 정보가 더 있다면 되묻기 + 할루미네이션 방지하기(최상단 레이어) 시스템 프롬포트 레이어 구성
-    human = HumanMessage(content=state["user_input"])
+    system = SystemMessage(content=load_prompt("think.txt", NAME=NAME))
+
+    user_content = state["user_input"]
+    if memory_context:
+        user_content += memory_context
+
+    human = HumanMessage(content=user_content)
     messages = [system, human]
     response = llm_think_with_tools.invoke(messages)
-
-    print(f"[DEBUG] tool_calls: {getattr(response, 'tool_calls', [])}")
     return {**state, "messages": [system, human, response]}
-
 # 노드 2 — answer (캐릭터 말투로 최종 답변)
 # brain/agent.py - answer_node 함수 전체 교체
 
@@ -93,32 +105,55 @@ def detect_emotion(answer: str) -> tuple[str, str]:
     return emotion, clean_answer
 
 def answer_node(state: VTuberState) -> VTuberState:
-    system = SystemMessage(content=f"""You are '{NAME}', a cute Korean VTuber. 
-    RULES:
-    - Korean only, no other languages mixed in
-    - Casual Korean (반말)
-    - 1~2 sentences
-    - End with [EMOTION:tag]
-    - Tags: happy, love, excited, surprised, confused, nervous, sad, angry, thinking, neutral
-    """)
-    
+    system = SystemMessage(content=load_prompt("answer.txt", NAME=NAME))
+
     # 툴 결과 추출
     tool_results = ""
     for msg in state["messages"]:
         if hasattr(msg, "type") and msg.type == "tool":
             tool_results += f"\n{msg.content}"
 
-    # 툴 결과 있으면 같이 넘기기
-    user_content = state["user_input"]
+    # ✅ messages에서 memory_context 추출 (HumanMessage에 포함돼 있음)
+    user_content = ""
+    for msg in state["messages"]:
+        if isinstance(msg, HumanMessage):
+            user_content = msg.content
+            break
+
     if tool_results:
         user_content += f"\n\n[검색 결과]{tool_results}"
 
     human = HumanMessage(content=user_content)
     response = llm_answer.invoke([system, human])
     answer = response.content
+    ...
+
+    import re as _re
+    clarification = _re.search(r'\[NEED_CLARIFICATION:(.*?)\]', answer)
+    if clarification:
+        question = clarification.group(1).strip()
+        clean_answer = question + " [EMOTION:confused]"
+        emotion, clean_answer = detect_emotion(clean_answer)
+        vtube_expression = EMOTION_MAP.get(emotion, None)
+        memory_tool.save(state["user_input"], clean_answer)
+        return {**state, "answer": clean_answer, "emotion": emotion, "vtube_expression": vtube_expression}
 
     emotion, clean_answer = detect_emotion(answer)
     vtube_expression = EMOTION_MAP.get(emotion, None)
+    
+    with open("obs/overlay.html", "r", encoding="utf-8") as f:
+        overlay = f.read()
+
+    overlay_updated = re.sub(
+        r'<div id="message">.*?</div>',
+        f'<div id="message">{clean_answer}</div>',
+        overlay,
+        flags=re.DOTALL
+    )
+
+    with open("obs/overlay.html", "w", encoding="utf-8") as f:
+        f.write(overlay_updated)
+
     memory_tool.save(state["user_input"], answer)
     return {**state, "answer": clean_answer, "emotion": emotion, "vtube_expression": vtube_expression}
 # 그래프 조립
@@ -158,27 +193,30 @@ agent = graph.compile()
 if __name__ == "__main__":
     import asyncio
     from avatar.vtube_bridge import VTubeBridge
+    from chat.reader import ChzzkReader
 
     async def main():
         bridge = VTubeBridge()
         await bridge.connect()
-        print(f"{NAME} 에이전트 시작! (종료: Ctrl+C)\n")
+        print(f"{NAME} 에이전트 시작!\n")
 
-        while True:
-            user_input = input("채팅 입력: ")
+        async def handle_chat(nickname: str, content: str):
             result = agent.invoke({
-                "user_input":       user_input,
+                "user_input":       f"{nickname}: {content}",
                 "messages":         [],
                 "emotion":          "",
                 "vtube_expression": None,
                 "answer":           ""
             })
-            print(f"\n😊 감정: {result['emotion']} → {result['vtube_expression']}")
+            print(f"😊 감정: {result['emotion']} → {result['vtube_expression']}")
             print(f"🎤 {NAME}: {result['answer']}\n")
 
             await asyncio.gather(
-                bridge.trigger_and_reset(result["vtube_expression"], duration=3.0),
+                bridge.trigger_and_reset(result["vtube_expression"], duration=5.0),
                 text_to_speech(result["answer"])
             )
 
-    asyncio.run(main())  # ← 이게 async 함수를 실행시켜주는 진입점
+        reader = ChzzkReader(on_chat_callback=handle_chat)
+        await reader.start()
+
+    asyncio.run(main())

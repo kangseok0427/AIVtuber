@@ -4,13 +4,15 @@ from langchain.tools import tool
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
 from langchain_core.documents import Document
+from dotenv import load_dotenv
+load_dotenv()
 
 class MemoryTool:
     def __init__(self, collection: str = "gaon_memory"):  # ✅ 이름 고정
         self.collection = collection
         self.embeddings = OllamaEmbeddings(
-            model=os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
-            base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+            model=os.getenv("OLLAMA_EMBED_MODEL"),
+            base_url=os.getenv("OLLAMA_BASE_URL")
         )
         self.db = Chroma(
             collection_name=self.collection,
