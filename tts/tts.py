@@ -83,10 +83,10 @@ async def text_to_speech(text: str) -> str:
         result = await loop.run_in_executor(None, lambda: client.predict(
             True,                            # terms_accepted
             0,                               # param_1:  pitch
-            0.75,                            # param_2:  index_rate
+            0.5,                             # param_2:  index_rate
             1.0,                             # param_3:  volume_envelope
             0.5,                             # param_4:  protect
-            "rmvpe",                         # param_5:  f0_method
+            "fcpe",                          # param_5:  f0_method
             applio_input,                    # param_6:  input_path
             applio_output,                   # param_7:  output_path
             f"logs/models/{MODEL_NAME}",     # param_8:  pth_path
